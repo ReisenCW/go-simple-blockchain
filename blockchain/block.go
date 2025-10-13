@@ -1,6 +1,8 @@
 package blockchain
 
 import (
+	"bytes"
+	"encoding/gob"
 	"fmt"
 	"time"
 )
@@ -21,16 +23,6 @@ func (b *Block) PrintBlock() {
 	fmt.Printf("================\nBlock %x:\nPrevHash: %x\nData: %s\nTimeStamp: %d\nNonce: %d\n", b.Hash, b.PrevHash, b.Data, b.TimeStamp, b.Nonce)
 }
 
-// func (b *Block) SetHash() {
-// 	// int转字符串, 10:十进制
-// 	timestamp := []byte(strconv.FormatInt(b.TimeStamp, 10))
-// 	// 直接拼接
-// 	headers := bytes.Join([][]byte{b.Data, timestamp, b.PrevHash}, []byte{})
-// 	hash := sha256.Sum256(headers)
-// 	b.Hash = hash[:]
-// }
-
-
 func NewBlock(data string, prevHash []byte) *Block {
 	block := &Block {
 		TimeStamp: time.Now().Unix(),
@@ -39,7 +31,7 @@ func NewBlock(data string, prevHash []byte) *Block {
 		Hash:      []byte{},
 	}
 	// block.SetHash()
-	pow := NewPowerOfWork(block)
+	pow := NewProofOfWork(block)
 	nonce, hash := pow.Run()
 	block.Hash, block.Nonce = hash[:], nonce
 	
@@ -47,4 +39,21 @@ func NewBlock(data string, prevHash []byte) *Block {
 	fmt.Printf("\nPow: %v\n\n", isValid)
 
 	return block
+}
+
+
+// 在 BoltDB 中，值只能是 []byte 类型, 因此需要序列化和反序列化
+func (b *Block) Serialize() []byte {
+	var result bytes.Buffer
+	// 创建一个将数据写入result缓冲区的encoder
+	encoder := gob.NewEncoder(&result)
+	encoder.Encode(b)
+	return result.Bytes()
+}
+
+func DeserializeBlock(d []byte) *Block {
+	var block Block
+	decoder := gob.NewDecoder(bytes.NewReader(d))
+	decoder.Decode(&block)
+	return &block
 }

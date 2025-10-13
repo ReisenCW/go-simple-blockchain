@@ -15,20 +15,20 @@ func IntToHex(n int64) []byte {
 	return []byte(fmt.Sprintf("%x", n))
 }
 
-type PowerOfWork struct {
+type ProofOfWork struct {
 	block *Block
 	target *big.Int
 }
 
-func NewPowerOfWork(b *Block) *PowerOfWork {
+func NewProofOfWork(b *Block) *ProofOfWork {
 	target := big.NewInt(1)
 	// 左移256 - targetBits位
 	// 即 左侧开始数有targetBits个0
 	target.Lsh(target, uint(256 - targetBits))
-	return &PowerOfWork{block: b, target: target}
+	return &ProofOfWork{block: b, target: target}
 }
 
-func (pow *PowerOfWork) PrepareData(nonce int) []byte {
+func (pow *ProofOfWork) PrepareData(nonce int) []byte {
 	data := bytes.Join([][]byte{
 		pow.block.PrevHash,
 		pow.block.Data,
@@ -39,7 +39,7 @@ func (pow *PowerOfWork) PrepareData(nonce int) []byte {
 }
 
 // 返回符合条件的nonce值和对应的hash
-func (pow *PowerOfWork) Run() (int, []byte) {
+func (pow *ProofOfWork) Run() (int, []byte) {
 	nonce := 0
 	var hash [32]byte
 
@@ -61,7 +61,7 @@ func (pow *PowerOfWork) Run() (int, []byte) {
 }
 
 // 验证pow是否有效
-func (pow *PowerOfWork) Validate() bool {
+func (pow *ProofOfWork) Validate() bool {
 	data := pow.PrepareData(pow.block.Nonce)
 	hash := sha256.Sum256(data)
 	hashInt := new(big.Int).SetBytes(hash[:])
