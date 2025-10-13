@@ -19,3 +19,9 @@ func NewGenesisBlock() *Block {
 func NewBlockChain() *BlockChain {
 	return &BlockChain{[]*Block{NewGenesisBlock()}}
 }
+
+func (bc *BlockChain) PrintBlockChain() {
+	for _, block := range( bc.block ) {
+		block.PrintBlock()
+	}
+}
