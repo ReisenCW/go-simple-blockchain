@@ -1,10 +1,7 @@
 package blockchain
 
 import (
-	"bytes"
-	"crypto/sha256"
 	"fmt"
-	"strconv"
 	"time"
 )
 
@@ -17,20 +14,22 @@ type Block struct {
 	Data      []byte
 	Hash      []byte
 	PrevHash  []byte
+	Nonce     int
 }
 
 func (b *Block) PrintBlock() {
-	fmt.Printf("================\nBlock %x:\nPrevHash: %x\nData: %s\nTimeStamp: %d\n", b.Hash, b.PrevHash, b.Data, b.TimeStamp)
+	fmt.Printf("================\nBlock %x:\nPrevHash: %x\nData: %s\nTimeStamp: %d\nNonce: %d\n", b.Hash, b.PrevHash, b.Data, b.TimeStamp, b.Nonce)
 }
 
-func (b *Block) SetHash() {
-	// int转字符串, 10:十进制
-	timestamp := []byte(strconv.FormatInt(b.TimeStamp, 10))
-	// 直接拼接
-	headers := bytes.Join([][]byte{b.Data, timestamp, b.PrevHash}, []byte{})
-	hash := sha256.Sum256(headers)
-	b.Hash = hash[:]
-}
+// func (b *Block) SetHash() {
+// 	// int转字符串, 10:十进制
+// 	timestamp := []byte(strconv.FormatInt(b.TimeStamp, 10))
+// 	// 直接拼接
+// 	headers := bytes.Join([][]byte{b.Data, timestamp, b.PrevHash}, []byte{})
+// 	hash := sha256.Sum256(headers)
+// 	b.Hash = hash[:]
+// }
+
 
 func NewBlock(data string, prevHash []byte) *Block {
 	block := &Block {
@@ -39,6 +38,13 @@ func NewBlock(data string, prevHash []byte) *Block {
 		PrevHash:  prevHash,
 		Hash:      []byte{},
 	}
-	block.SetHash()
+	// block.SetHash()
+	pow := NewPowerOfWork(block)
+	nonce, hash := pow.Run()
+	block.Hash, block.Nonce = hash[:], nonce
+	
+	isValid := pow.Validate()
+	fmt.Printf("\nPow: %v\n\n", isValid)
+
 	return block
 }

@@ -1,13 +1,13 @@
 package blockchain
 
 type BlockChain struct{
-	block []*Block
+	blocks []*Block
 }
 
 func (bc *BlockChain) AddBlock(data string) {
-	previousBlock := bc.block[len(bc.block) - 1]
+	previousBlock := bc.blocks[len(bc.blocks) - 1]
 	newBlock := NewBlock(data, previousBlock.Hash)
-	bc.block = append(bc.block, newBlock)
+	bc.blocks = append(bc.blocks, newBlock)
 }
 
 // 区块链中至少要有一个块，称为创世块
@@ -21,7 +21,7 @@ func NewBlockChain() *BlockChain {
 }
 
 func (bc *BlockChain) PrintBlockChain() {
-	for _, block := range( bc.block ) {
+	for _, block := range( bc.blocks ) {
 		block.PrintBlock()
 	}
 }
