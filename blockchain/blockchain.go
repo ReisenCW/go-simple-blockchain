@@ -2,11 +2,14 @@ package blockchain
 
 import (
 	"fmt"
+	"os"
+
 	"github.com/boltdb/bolt"
 )
 
 const dbFile = "blockchain.db"
 const blocksBucket = "blocks"
+const genesisCoinbaseData = "The Times 03/Jan/2009 Chancellor on brink of second bailout for banks"
 
 type BlockChain struct{
 	tip []byte 		// 用于存储区块链"末端"（最新区块）的哈希值
@@ -22,7 +25,7 @@ func (bc *BlockChain) Iterator() *BlockChainIterator {
 	return &BlockChainIterator{bc.tip, bc.db}
 }
 
-func (bc *BlockChain) AddBlock(data string) error {
+func (bc *BlockChain) MineBlock(transactions []*Transaction) error {
 	var lastHash []byte
 
 	if err := bc.db.View(func(tx *bolt.Tx) error {
@@ -36,7 +39,7 @@ func (bc *BlockChain) AddBlock(data string) error {
 		return fmt.Errorf("failed to get last hash: %w", err)
 	}
 
-	newBlock := NewBlock(data, lastHash)
+	newBlock := NewBlock(transactions, lastHash)
 
 	if err := bc.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
@@ -59,13 +62,24 @@ func (bc *BlockChain) AddBlock(data string) error {
 }
 
 // 区块链中至少要有一个块，称为创世块
-func NewGenesisBlock() *Block {
-	return NewBlock("Genesis Block", []byte{})
+func NewGenesisBlock(coinbase *Transaction) *Block {
+	return NewBlock([]*Transaction{coinbase}, []byte{})
 }
 
-// 创建一个新的区块链,该链初始自带一个创世块
-// 返回 (*BlockChain, error) 并将初始化过程中的错误向上返回
-func NewBlockChain() (*BlockChain, error) {
+func IsDataBaseExists() bool {
+	if _, err := os.Stat(dbFile); os.IsNotExist(err) {
+		return false
+	}
+	return true
+}
+
+// 当区块链数据库已存在（包含创世块及后续区块）时
+// 通过该函数连接到现有数据库，初始化区块链实例，获取链的最新状态（末端哈希），供后续操作（如添加区块、查询交易等）使用
+func NewBlockChain(address string) (*BlockChain, error) {
+	if !IsDataBaseExists() {
+		fmt.Println("No existing blockchain found. Create one first.")
+		os.Exit(1)
+	}
 	var tip []byte 
 	db, err := bolt.Open(dbFile, 0600, nil)
 	if err != nil {
@@ -73,27 +87,52 @@ func NewBlockChain() (*BlockChain, error) {
 	}
 	// bolt数据库的读写事务方法，用于执行修改数据库的操作
 	err = db.Update(func (tx *bolt.Tx) error {
-		 // 尝试从当前事务中获取名为blocksBucket的 "桶"，类似数据库的 "表"
+		// 尝试从当前事务中获取名为blocksBucket的 "桶"，类似数据库的 "表"
 		b := tx.Bucket([]byte(blocksBucket))
+		tip = b.Get([]byte("l"))
+		return nil
+	})
 
-		if b == nil {
-			genesis := NewGenesisBlock()
-			b, err := tx.CreateBucket([]byte(blocksBucket))
-			if err != nil {
-				return err
-			}
-			if err = b.Put(genesis.Hash, genesis.Serialize()); err != nil {
-				return err
-			}
-			// 用键"l"（"last"的缩写）记录最新区块的哈希（此时为创世块哈希）
-			if err = b.Put([]byte("l"), genesis.Hash); err != nil {
-				return err
-			}
-			tip = genesis.Hash // 更新tip为创世块哈希（链的末端是创世块）
-		} else {
-			// 若桶已存在，说明区块链已存在，从桶中读取最新区块的哈希
-			tip = b.Get([]byte("l"))
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to initialize db: %w", err)
+	}
+
+	bc := BlockChain{tip, db}
+
+	return &bc, nil
+}
+
+// CreateBlockchain 创建一个新的区块链数据库
+// address 用来接收挖出创世块的奖励
+func CreateBlockChain(address string) (*BlockChain, error) {
+	if IsDataBaseExists() {
+		fmt.Println("Blockchain already exists.")
+		os.Exit(1)
+	}
+	var tip []byte 
+	db, err := bolt.Open(dbFile, 0600, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open db: %w", err)
+	}
+	// bolt数据库的读写事务方法，用于执行修改数据库的操作
+	err = db.Update(func (tx *bolt.Tx) error {
+		// 创建创世块
+		cbtx := NewCoinbaseTX(address, genesisCoinbaseData)
+		genesis := NewGenesisBlock(cbtx)
+
+		b, err := tx.CreateBucket([]byte(blocksBucket))
+		if err != nil {
+			return err
 		}
+		if err = b.Put(genesis.Hash, genesis.Serialize()); err != nil {
+			return err
+		}
+		// 用键"l"（"last"的缩写）记录最新区块的哈希（此时为创世块哈希）
+		if err = b.Put([]byte("l"), genesis.Hash); err != nil {
+			return err
+		}
+		tip = genesis.Hash // 更新tip为创世块哈希（链的末端是创世块）
 		return nil
 	})
 
@@ -111,8 +150,8 @@ func (bc *BlockChain) CloseDB() {
 	bc.db.Close()
 }
 
-// 从tip(末端)向前遍历区块链
-// 同时杜绝了分支的问题(因为父Hash是唯一的)
+// 在区块链数据库不存在时，创建一个全新的区块链数据库
+// 生成创世块（区块链的第一个区块），并将创世块的挖矿奖励分配给指定地址
 func (i *BlockChainIterator) Next() *Block {
 	var block *Block
 

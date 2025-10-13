@@ -2,6 +2,7 @@ package blockchain
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/gob"
 	"fmt"
 	"time"
@@ -12,32 +13,32 @@ import (
 // Hash				当前块的哈希
 // PrevHash			前一个块的哈希，即父哈希
 type Block struct {
-	TimeStamp int64
-	Data      []byte
-	Hash      []byte
-	PrevHash  []byte
-	Nonce     int
+	TimeStamp   	int64
+	Transactions 	[]*Transaction
+	Hash         	[]byte
+	PrevHash    	[]byte
+	Nonce       	int
 }
 
 func (b *Block) PrintBlock() {
-	fmt.Printf("================\nBlock %x:\nPrevHash: %x\nData: %s\nTimeStamp: %d\nNonce: %d\n", b.Hash, b.PrevHash, b.Data, b.TimeStamp, b.Nonce)
+	fmt.Printf("================\nBlock %x:\nPrevHash: %x\n", b.Hash, b.PrevHash)
+	for _, tx := range b.Transactions {
+		tx.PrintTransaction()
+	}
+	fmt.Printf("Timestamp: %d\n", b.TimeStamp)
+	fmt.Printf("Nonce: %d\n", b.Nonce)
 }
 
-func NewBlock(data string, prevHash []byte) *Block {
+func NewBlock(transactions []*Transaction, prevHash []byte) *Block {
 	block := &Block {
-		TimeStamp: time.Now().Unix(),
-		Data:      []byte(data),
-		PrevHash:  prevHash,
-		Hash:      []byte{},
+		TimeStamp: 			time.Now().Unix(),
+		Transactions:      	transactions,
+		PrevHash:  			prevHash,
+		Hash:      			[]byte{},
 	}
-	// block.SetHash()
 	pow := NewProofOfWork(block)
 	nonce, hash := pow.Run()
 	block.Hash, block.Nonce = hash[:], nonce
-	
-	isValid := pow.Validate()
-	fmt.Printf("\nPow: %v\n\n", isValid)
-
 	return block
 }
 
@@ -56,4 +57,16 @@ func DeserializeBlock(d []byte) *Block {
 	decoder := gob.NewDecoder(bytes.NewReader(d))
 	decoder.Decode(&block)
 	return &block
+}
+
+func (block *Block) HashTransactions() []byte {
+	var txHashes [][]byte
+	var txHash [32]byte
+
+	for _, tx := range block.Transactions {
+		txHashes = append(txHashes, tx.ID)
+	}
+	txHash = sha256.Sum256(bytes.Join(txHashes, []byte{}))
+
+	return txHash[:]
 }

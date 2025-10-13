@@ -11,6 +11,7 @@ package cli
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 
@@ -37,61 +38,117 @@ func (cli *CLI) validateArgs() {
 
 func (cli *CLI) printUsage() {
 	fmt.Println("Usage:")
-	fmt.Println("  addblock -data BLOCK_DATA - add a block to the blockchain")
-	fmt.Println("  printchain - print all the blocks of the blockchain")
+	fmt.Println("  getbalance -address ADDRESS - Get balance of ADDRESS")
+	fmt.Println("  createblockchain -address ADDRESS - Create a blockchain and send genesis block reward to ADDRESS")
+	fmt.Println("  printchain - Print all the blocks of the blockchain")
+	fmt.Println("  send -from FROM -to TO -amount AMOUNT - Send AMOUNT of coins from FROM address to TO")
 }
 
 func (cli *CLI) Run() {
 	cli.validateArgs()
 
-	addBlockCmd := flag.NewFlagSet("addblock", flag.ExitOnError)
+	getBalanceCmd := flag.NewFlagSet("getbalance", flag.ExitOnError)
+	createBlockChainCmd := flag.NewFlagSet("createblockchain", flag.ExitOnError)
 	printChainCmd := flag.NewFlagSet("printchain", flag.ExitOnError)
+	sendCmd := flag.NewFlagSet("send", flag.ExitOnError)
 
-	// 	为addblock命令注册一个参数选项-data：
-	// 第一个参数"data"：选项名（用户输入时需用-data指定）。
-	// 第二个参数""：data的默认值（若用户未指定-data，则为为空字符串）。
-	// 第三个参数"Block data"：选项描述（用于-h/--help时显示帮助信息）。
-	// 返回值addBlockData是一个字符串指针，后续可通过*addBlockData获取用户输入的区块数据。
-	addBlockData := addBlockCmd.String("data", "", "Block data")
+	getBalanceAddress := getBalanceCmd.String("address", "", "The address to get balance for")
+	createBlockChainAddress := createBlockChainCmd.String("address", "", "The address to send genesis block reward to")
+	sendFrom := sendCmd.String("from", "", "Source wallet address")
+	sendTo := sendCmd.String("to", "", "Destination wallet address")
+	sendAmount := sendCmd.Int("amount", 0, "Amount to send")
 
 	switch os.Args[1] {
-	case "addblock":
-		addBlockCmd.Parse(os.Args[2:])
+	case "getbalance":
+		err := getBalanceCmd.Parse(os.Args[2:])
+		if err != nil {
+			log.Panic(err)
+		}
+	case "createblockchain":
+		err := createBlockChainCmd.Parse(os.Args[2:])
+		if err != nil {
+			log.Panic(err)
+		}
+	case "send":
+		err := sendCmd.Parse(os.Args[2:])
+		if err != nil {
+			log.Panic(err)
+		}
 	case "printchain":
-		printChainCmd.Parse(os.Args[2:])
+		err := printChainCmd.Parse(os.Args[2:])
+		if err != nil {
+			log.Panic(err)
+		}
 	default:
 		cli.printUsage()
 		os.Exit(1)
 	}
-
-	// 判断addblock命令是否被成功解析
-	if addBlockCmd.Parsed() {
-		// 检查数据是否为空, 若为空，提示用法
-		if *addBlockData == "" { 
-			addBlockCmd.Usage()
+	if getBalanceCmd.Parsed() {
+		if *getBalanceAddress == "" {
+			getBalanceCmd.Usage()
 			os.Exit(1)
 		}
-		cli.addBlock(*addBlockData)
+		cli.getBalance(*getBalanceAddress)
+	}
+	if createBlockChainCmd.Parsed() {
+		if *createBlockChainAddress == "" {
+			createBlockChainCmd.Usage()
+			os.Exit(1)
+		}
+		cli.createBlockChain(*createBlockChainAddress)
 	}
 
 	if printChainCmd.Parsed() {
 		cli.printChain()
 	}
+
+	if sendCmd.Parsed() {
+		if *sendFrom == "" || *sendTo == "" || *sendAmount <= 0 {
+			sendCmd.Usage()
+			os.Exit(1)
+		}
+
+		cli.send(*sendFrom, *sendTo, *sendAmount)
+	}
 }
 
-func (cli *CLI) addBlock(data string) {
-	cli.bc.AddBlock(data)
-	fmt.Println("Success!")
+func (cli *CLI) createBlockChain(address string) {
+	bc, err := blockchain.CreateBlockChain(address)
+	if err != nil {
+		fmt.Printf("Error creating blockchain: %v\n", err)
+		return
+	}
+	bc.CloseDB()
+	fmt.Println("Done!")
+}
+
+func (cli *CLI) getBalance(address string) {
+	bc, err := blockchain.NewBlockChain(address)
+	if err != nil {
+		fmt.Printf("Error creating blockchain: %v\n", err)
+		return
+	}
+	defer bc.CloseDB()
+
+	balance := 0
+	UTXOs := bc.FindUTXO(address)
+
+	for _, out := range UTXOs {
+		balance += out.Value
+	}
+
+	fmt.Printf("Balance of '%s': %d\n", address, balance)
 }
 
 func (cli *CLI) printChain() {
-	bci := cli.bc.Iterator()
+	bc, _ := blockchain.NewBlockChain("")
+	defer bc.CloseDB()
 
+	bci := bc.Iterator()
 	for {
 		block := bci.Next()
 
 		fmt.Printf("Prev. hash: %x\n", block.PrevHash)
-		fmt.Printf("Data: %s\n", block.Data)
 		fmt.Printf("Hash: %x\n", block.Hash)
 		pow := blockchain.NewProofOfWork(block)
 		fmt.Printf("PoW: %s\n", strconv.FormatBool(pow.Validate()))
@@ -102,4 +159,20 @@ func (cli *CLI) printChain() {
 			break
 		}
 	}
+}
+
+func (cli *CLI) send(from, to string, amount int) {
+	bc, _ := blockchain.NewBlockChain(from)
+	defer bc.CloseDB()
+
+	tx, err := blockchain.NewUTXOTransaction(from, to, amount, bc)
+	if err != nil {
+		fmt.Printf("Failed to create transaction: %v\n", err)
+		return
+	}
+	if err := bc.MineBlock([]*blockchain.Transaction{tx}); err != nil {
+		fmt.Printf("Failed to mine block: %v\n", err)
+		return
+	}
+	fmt.Println("Success!")
 }
