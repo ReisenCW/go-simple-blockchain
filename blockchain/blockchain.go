@@ -1,6 +1,10 @@
 package blockchain
 
 import (
+	"bytes"
+	"crypto/ecdsa"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 
@@ -27,6 +31,12 @@ func (bc *BlockChain) Iterator() *BlockChainIterator {
 
 func (bc *BlockChain) MineBlock(transactions []*Transaction) error {
 	var lastHash []byte
+
+	for _, tx := range transactions {
+		if !bc.VerifyTransaction(tx) {
+			panic("ERROR: Invalid transaction")
+		}
+	}
 
 	if err := bc.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
@@ -168,4 +178,46 @@ func (i *BlockChainIterator) Next() *Block {
 	i.currentHash = block.PrevHash
 
 	return block
+}
+
+func (bc *BlockChain) FindTransaction(ID []byte) (Transaction, error) {
+	bci := bc.Iterator()
+
+	for {
+		block := bci.Next()
+
+		for _, tx := range block.Transactions {
+			if bytes.Equal(tx.ID, ID) {
+				return *tx, nil
+			}
+		}
+
+		if len(block.PrevHash) == 0 {
+			break
+		}
+	}
+
+	return Transaction{}, errors.New("Transaction is not found")
+}
+
+func (bc *BlockChain) SignTransaction(tx *Transaction, privKey ecdsa.PrivateKey) {
+	prevTXs := make(map[string]Transaction)
+
+	for _, vin := range tx.Vin {
+		prevTX, _ := bc.FindTransaction(vin.Txid)
+		prevTXs[hex.EncodeToString(prevTX.ID)] = prevTX
+	}
+
+	tx.Sign(privKey, prevTXs)
+}
+
+func (bc *BlockChain) VerifyTransaction(tx *Transaction) bool {
+	prevTXs := make(map[string]Transaction)
+
+	for _, vin := range tx.Vin {
+		prevTX, _ := bc.FindTransaction(vin.Txid)
+		prevTXs[hex.EncodeToString(prevTX.ID)] = prevTX
+	}
+
+	return tx.Verify(prevTXs)
 }

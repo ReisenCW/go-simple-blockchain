@@ -1,2 +1,3 @@
-blockchain.db
+*.db
+wallet.dat
 go-blockchain

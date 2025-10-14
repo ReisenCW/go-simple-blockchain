@@ -23,7 +23,7 @@ type Block struct {
 func (b *Block) PrintBlock() {
 	fmt.Printf("================\nBlock %x:\nPrevHash: %x\n", b.Hash, b.PrevHash)
 	for _, tx := range b.Transactions {
-		tx.PrintTransaction()
+		fmt.Println(tx.String())
 	}
 	fmt.Printf("Timestamp: %d\n", b.TimeStamp)
 	fmt.Printf("Nonce: %d\n", b.Nonce)

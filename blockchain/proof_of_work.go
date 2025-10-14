@@ -3,17 +3,12 @@ package blockchain
 import (
 	"bytes"
 	"math/big"
-	"fmt"
 	"math"
 	"crypto/sha256"
 )
 
 const targetBits = 24
 const maxNonce = math.MaxInt64
-
-func IntToHex(n int64) []byte {
-	return []byte(fmt.Sprintf("%x", n))
-}
 
 type ProofOfWork struct {
 	block *Block
