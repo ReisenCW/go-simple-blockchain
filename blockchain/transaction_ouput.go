@@ -1,6 +1,10 @@
 package blockchain
 
-import "bytes"
+import (
+	"bytes"
+	"encoding/gob"
+	"log"
+)
 
 // TXOutput 包含两部分
 // Value: 有多少币，就是存储在 Value 里面
@@ -8,6 +12,10 @@ import "bytes"
 type TXOutput struct {
 	Value        int
 	PubKeyHash   []byte
+}
+
+type TXOutputs struct {
+	Outputs []TXOutput
 }
 
 // 创建输出时，将其 “绑定” 到一个地址（即只有该地址的所有者才能花费）
@@ -28,4 +36,28 @@ func NewTXOutput(value int, address string) *TXOutput {
 	txo.Lock([]byte(address))
 
 	return txo
+}
+
+func (outs TXOutputs) Serialize() []byte {
+	var buff bytes.Buffer
+
+	enc := gob.NewEncoder(&buff)
+	err := enc.Encode(outs)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	return buff.Bytes()
+}
+
+func DeserializeOutputs(data []byte) TXOutputs {
+	var outputs TXOutputs
+
+	dec := gob.NewDecoder(bytes.NewReader(data))
+	err := dec.Decode(&outputs)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	return outputs
 }

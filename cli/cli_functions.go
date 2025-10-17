@@ -16,7 +16,10 @@ func (cli *CLI) createBlockChain(address string) {
 		fmt.Printf("Error creating blockchain: %v\n", err)
 		return
 	}
-	bc.CloseDB()
+	defer bc.CloseDB()
+
+	UTXOSet := blockchain.UTXOSet{Blockchain: bc}
+	UTXOSet.Reindex()
 	fmt.Println("Done!")
 }
 
@@ -24,7 +27,8 @@ func (cli *CLI) getBalance(address string) {
 	if !blockchain.ValidateAddress(address) {
 		log.Panic("ERROR: Address is not valid")
 	}
-	bc, err := blockchain.NewBlockChain(address)
+	bc, err := blockchain.NewBlockChain()
+	UTXOSet := blockchain.UTXOSet{Blockchain: bc}
 	if err != nil {
 		fmt.Printf("Error creating blockchain: %v\n", err)
 		return
@@ -34,7 +38,7 @@ func (cli *CLI) getBalance(address string) {
 	balance := 0
 	pubKeyHash := blockchain.Base58Decode([]byte(address))
 	pubKeyHash = pubKeyHash[1 : len(pubKeyHash)-4]
-	UTXOs := bc.FindUTXO(pubKeyHash)
+	UTXOs := UTXOSet.FindUTXO(pubKeyHash)
 
 	for _, out := range UTXOs {
 		balance += out.Value
@@ -44,7 +48,7 @@ func (cli *CLI) getBalance(address string) {
 }
 
 func (cli *CLI) printChain() {
-	bc, _ := blockchain.NewBlockChain("")
+	bc, _ := blockchain.NewBlockChain()
 	defer bc.CloseDB()
 
 	bci := bc.Iterator()
@@ -71,18 +75,19 @@ func (cli *CLI) send(from, to string, amount int) {
 	if !blockchain.ValidateAddress(to) {
 		log.Panic("ERROR: Address to is not valid")
 	}
-	bc, _ := blockchain.NewBlockChain(from)
+	bc, _ := blockchain.NewBlockChain()
+	UTXOSet := blockchain.UTXOSet{Blockchain: bc}
 	defer bc.CloseDB()
 
-	tx, err := blockchain.NewUTXOTransaction(from, to, amount, bc)
+	tx, err := blockchain.NewUTXOTransaction(from, to, amount, &UTXOSet)
+	cbtx := blockchain.NewCoinbaseTX(from, "")
 	if err != nil {
 		fmt.Printf("Failed to create transaction: %v\n", err)
 		return
 	}
-	if err := bc.MineBlock([]*blockchain.Transaction{tx}); err != nil {
-		fmt.Printf("Failed to mine block: %v\n", err)
-		return
-	}
+	txs := []*blockchain.Transaction{cbtx, tx}
+	newBlock := bc.MineBlock(txs)
+	UTXOSet.Update(newBlock)
 	fmt.Println("Success!")
 }
 
@@ -104,4 +109,13 @@ func (cli *CLI) listAddresses() {
 	for _, address := range addresses {
 		fmt.Println(address)
 	}
+}
+
+func (cli *CLI) reindexUTXO() {
+	bc, _ := blockchain.NewBlockChain()
+	UTXOSet := blockchain.UTXOSet{Blockchain: bc}
+	UTXOSet.Reindex()
+
+	count := UTXOSet.CountTransactions()
+	fmt.Printf("Done! There are %d transactions in the UTXO set.\n", count)
 }

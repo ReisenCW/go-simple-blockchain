@@ -20,16 +20,11 @@ type BlockChain struct{
 	db *bolt.DB		// 持久化存储区块链数据的数据库连接
 }
 
-type BlockChainIterator struct {
-	currentHash []byte
-	db 			*bolt.DB
-}
-
 func (bc *BlockChain) Iterator() *BlockChainIterator {
 	return &BlockChainIterator{bc.tip, bc.db}
 }
 
-func (bc *BlockChain) MineBlock(transactions []*Transaction) error {
+func (bc *BlockChain) MineBlock(transactions []*Transaction) *Block {
 	var lastHash []byte
 
 	for _, tx := range transactions {
@@ -41,12 +36,12 @@ func (bc *BlockChain) MineBlock(transactions []*Transaction) error {
 	if err := bc.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
 		if b == nil {
-			return fmt.Errorf("bucket %s not found", blocksBucket)
+			return nil
 		}
 		lastHash = b.Get([]byte("l"))
 		return nil
 	}); err != nil {
-		return fmt.Errorf("failed to get last hash: %w", err)
+		return nil
 	}
 
 	newBlock := NewBlock(transactions, lastHash)
@@ -65,10 +60,10 @@ func (bc *BlockChain) MineBlock(transactions []*Transaction) error {
 		bc.tip = newBlock.Hash
 		return nil
 	}); err != nil {
-		return fmt.Errorf("failed to add new block: %w", err)
+		return nil
 	}
 
-	return nil
+	return newBlock
 }
 
 // 区块链中至少要有一个块，称为创世块
@@ -85,7 +80,7 @@ func IsDataBaseExists() bool {
 
 // 当区块链数据库已存在（包含创世块及后续区块）时
 // 通过该函数连接到现有数据库，初始化区块链实例，获取链的最新状态（末端哈希），供后续操作（如添加区块、查询交易等）使用
-func NewBlockChain(address string) (*BlockChain, error) {
+func NewBlockChain() (*BlockChain, error) {
 	if !IsDataBaseExists() {
 		fmt.Println("No existing blockchain found. Create one first.")
 		os.Exit(1)
@@ -160,26 +155,6 @@ func (bc *BlockChain) CloseDB() {
 	bc.db.Close()
 }
 
-// 在区块链数据库不存在时，创建一个全新的区块链数据库
-// 生成创世块（区块链的第一个区块），并将创世块的挖矿奖励分配给指定地址
-func (i *BlockChainIterator) Next() *Block {
-	var block *Block
-
-	if err := i.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(blocksBucket))
-		encodedBlock := b.Get(i.currentHash)
-		block = DeserializeBlock(encodedBlock)
-
-		return nil
-	}); err != nil {
-		panic(fmt.Sprintf("failed to iterate to next block: %v", err))
-	}
-
-	i.currentHash = block.PrevHash
-
-	return block
-}
-
 func (bc *BlockChain) FindTransaction(ID []byte) (Transaction, error) {
 	bci := bc.Iterator()
 
@@ -212,6 +187,10 @@ func (bc *BlockChain) SignTransaction(tx *Transaction, privKey ecdsa.PrivateKey)
 }
 
 func (bc *BlockChain) VerifyTransaction(tx *Transaction) bool {
+	// 如果是创世交易，直接返回true
+	if tx.IsCoinbase() {
+		return true
+	}
 	prevTXs := make(map[string]Transaction)
 
 	for _, vin := range tx.Vin {
@@ -220,4 +199,52 @@ func (bc *BlockChain) VerifyTransaction(tx *Transaction) bool {
 	}
 
 	return tx.Verify(prevTXs)
+}
+
+// 搜寻所有未花费的交易输出
+func (bc *BlockChain) FindUTXO() map[string]TXOutputs {
+	UTXO := make(map[string]TXOutputs)
+	spentTXOs := make(map[string][]int)
+	bci := bc.Iterator()
+
+	for {
+		block := bci.Next()
+
+		for _, tx := range block.Transactions {
+			// 将交易ID（字节数组）转换为十六进制字符串（方便作为map的key）
+			txID := hex.EncodeToString(tx.ID)
+
+		Outputs: // 标签，用于跳出当前循环到下一个输出
+			// 遍历当前交易的所有输出（outIdx是输出索引，out是输出本身）
+			for outIdx, out := range tx.Vout {
+				// 检查当前输出是否已被花费
+				// 末端节点一定没有被花费
+				if spentTXOs[txID] != nil {
+					// 遍历该交易中已被花费的输出索引
+					for _, spentOutIdx := range spentTXOs[txID] {
+						// 已被花费, 则跳过该输出
+						if spentOutIdx == outIdx {
+							continue Outputs
+						}
+					}
+				}
+				outs := UTXO[txID]
+				outs.Outputs = append(outs.Outputs, out)
+				UTXO[txID] = outs
+			}
+
+			if !tx.IsCoinbase() {
+				// 遍历当前交易的所有输入
+				for _, in := range tx.Vin {
+					inTxID := hex.EncodeToString(in.Txid)
+					spentTXOs[inTxID] = append(spentTXOs[inTxID], in.Vout)
+				}
+			}
+		}
+
+		if len(block.PrevHash) == 0 {
+			break
+		}
+	}
+	return UTXO
 }

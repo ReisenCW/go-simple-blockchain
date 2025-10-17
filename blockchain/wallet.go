@@ -29,7 +29,10 @@ func NewWallet() *Wallet {
 
 func newKeyPair() (ecdsa.PrivateKey, []byte) {
 	curve := elliptic.P256()
-	private, _ := ecdsa.GenerateKey(curve, rand.Reader)
+	private, err := ecdsa.GenerateKey(curve, rand.Reader)
+	if err != nil {
+		panic(fmt.Sprintf("failed to generate key pair: %v", err))
+	}
 	pubKey := append(private.PublicKey.X.Bytes(), private.PublicKey.Y.Bytes()...)
 
 	return *private, pubKey
@@ -60,7 +63,10 @@ func HashPubKey(pubKey []byte) []byte {
 
     // 第二步：对SHA-256结果做RIPEMD160哈希（得到20字节的公钥哈希，比特币地址核心）
 	RIPEMD160Hasher := ripemd160.New()
-	RIPEMD160Hasher.Write(publicSHA256[:])
+	_, err := RIPEMD160Hasher.Write(publicSHA256[:])
+	if err != nil {
+		panic(fmt.Sprintf("failed to hash public key: %v", err))
+	}
 	publicRIPEMD160 := RIPEMD160Hasher.Sum(nil)
 
 	return publicRIPEMD160
@@ -78,14 +84,9 @@ func checksum(payload []byte) []byte {
 
 func ValidateAddress(address string) bool {
 	pubKeyHash := Base58Decode([]byte(address))
-	fmt.Printf("totalKeyHash: %x\n", pubKeyHash)
 	actualChecksum := pubKeyHash[len(pubKeyHash)-addressChecksumLen:]
-	fmt.Printf("actualChecksum: %x\n", actualChecksum)
 	version := pubKeyHash[0]
-	fmt.Printf("version: %x\n", version)
 	pubKeyHash = pubKeyHash[1 : len(pubKeyHash)-addressChecksumLen]
-	fmt.Printf("pubKeyHash: %x\n", pubKeyHash)
 	targetChecksum := checksum(append([]byte{version}, pubKeyHash...))
-	fmt.Printf("targetChecksum: %x\n", targetChecksum)
-	return bytes.Equal(actualChecksum, targetChecksum)
+	return bytes.Compare(actualChecksum, targetChecksum) == 0
 }

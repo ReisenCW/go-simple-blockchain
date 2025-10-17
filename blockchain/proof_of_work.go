@@ -7,7 +7,7 @@ import (
 	"crypto/sha256"
 )
 
-const targetBits = 24
+const targetBits = 16
 const maxNonce = math.MaxInt64
 
 type ProofOfWork struct {
