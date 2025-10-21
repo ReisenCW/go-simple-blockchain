@@ -33,7 +33,7 @@ func Base58Encode(input []byte) []byte {
 
 	// 原始字节中的0x00是有意义的（比如地址中的版本号前可能有零），但在之前的除法中，前导零会被忽略
 	// 因此这里需要补回这些前导零
-	for b := range input {  // 遍历原始输入字节
+	for _, b := range input {  // 遍历原始输入字节
 		if b == 0x00 {  // 若原始字节是0x00（前导零）
 			result = append([]byte{b58Alphabet[0]}, result...)  // 在结果前加一个b58Alphabet[0]（即'1'）
 		} else {
