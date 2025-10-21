@@ -3,10 +3,14 @@ package cli
 // 使用方法:
 // 先编译出可执行文件：go build -o go-blockchain main.go
 // 再通过命令行运行命令, 例如:
-// 1. 添加区块:
-//    ./go-blockchain addblock -data "Send 1 BTC to Ivan"
-// 2. 打印区块链:
-//    ./go-blockchain printchain
+// 1. 创建钱包: ./go-blockchain createwallet
+// 2. 列出钱包地址: ./go-blockchain listaddresses
+// 3. 创建区块链: ./go-blockchain createblockchain -address ADDRESS
+// 4. 获取余额: ./go-blockchain getbalance -address ADDRESS
+// 5. 打印区块链: ./go-blockchain printchain
+// 6. 转账: ./go-blockchain send -from FROM -to TO -amount AMOUNT -mine
+// 7. 重建 UTXO 索引: ./go-blockchain reindexutxo
+// 8. 启动节点: NODE_ID=3000 ./go-blockchain startnode -miner ADDRESS
 
 import (
 	"flag"
