@@ -6,12 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/boltdb/bolt"
 )
 
-const dbFile = "blockchain.db"
+const dbFile = "blockchain_%s.db" // %s: 区分不同端口号, 模拟网络多节点
 const blocksBucket = "blocks"
 const genesisCoinbaseData = "The Times 03/Jan/2009 Chancellor on brink of second bailout for banks"
 
@@ -26,6 +27,7 @@ func (bc *BlockChain) Iterator() *BlockChainIterator {
 
 func (bc *BlockChain) MineBlock(transactions []*Transaction) *Block {
 	var lastHash []byte
+	var lastHeight int
 
 	for _, tx := range transactions {
 		if !bc.VerifyTransaction(tx) {
@@ -39,12 +41,18 @@ func (bc *BlockChain) MineBlock(transactions []*Transaction) *Block {
 			return nil
 		}
 		lastHash = b.Get([]byte("l"))
+
+		blockData := b.Get(lastHash)
+		block := DeserializeBlock(blockData)
+
+		lastHeight = block.Height
+
 		return nil
 	}); err != nil {
 		return nil
 	}
 
-	newBlock := NewBlock(transactions, lastHash)
+	newBlock := NewBlock(transactions, lastHash, lastHeight + 1)
 
 	if err := bc.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
@@ -66,12 +74,105 @@ func (bc *BlockChain) MineBlock(transactions []*Transaction) *Block {
 	return newBlock
 }
 
-// 区块链中至少要有一个块，称为创世块
-func NewGenesisBlock(coinbase *Transaction) *Block {
-	return NewBlock([]*Transaction{coinbase}, []byte{})
+// AddBlock saves the block into the blockchain
+func (bc *BlockChain) AddBlock(block *Block) {
+	err := bc.db.Update(func(tx *bolt.Tx) error {
+		// 获取名为blocksBucket = blocks的 "桶"，类似数据库的 "表"
+		b := tx.Bucket([]byte(blocksBucket))
+		// 检查区块是否已存在于数据库中
+		blockInDb := b.Get(block.Hash)
+		// 如果区块已存在，则不进行任何操作，直接返回
+		if blockInDb != nil {
+			return nil
+		}
+		// 如果区块不存在，则将其添加到数据库中
+		blockData := block.Serialize()
+		err := b.Put(block.Hash, blockData)
+		if err != nil {
+			log.Panic(err)
+		}
+
+		// 获取当前区块链的最新区块哈希
+		lastHash := b.Get([]byte("l"))
+		lastBlockData := b.Get(lastHash)
+		lastBlock := DeserializeBlock(lastBlockData)
+
+		// 如果新添加的区块高度更大, 则更新 "l" 键以及blockchain的tip, 指向新的最新区块哈希
+		if block.Height > lastBlock.Height {
+			err = b.Put([]byte("l"), block.Hash)
+			if err != nil {
+				log.Panic(err)
+			}
+			bc.tip = block.Hash
+		}
+
+		return nil
+	})
+	if err != nil {
+		log.Panic(err)
+	}
 }
 
-func IsDataBaseExists() bool {
+// GetBestHeight 返回区块链的最新高度（最新区块的高度）
+func (bc *BlockChain) GetBestHeight() int {
+	var lastBlock Block
+
+	err := bc.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(blocksBucket))
+		lastHash := b.Get([]byte("l"))
+		blockData := b.Get(lastHash)
+		lastBlock = *DeserializeBlock(blockData)
+
+		return nil
+	})
+	if err != nil {
+		log.Panic(err)
+	}
+
+	return lastBlock.Height
+}
+
+// GetBlock 根据区块哈希值获取对应的区块
+func (bc *BlockChain) GetBlock(blockHash []byte) (Block, error) {
+	var block Block
+
+	err := bc.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(blocksBucket))
+
+		blockData := b.Get(blockHash)
+
+		if blockData == nil {
+			return fmt.Errorf("Block %s is not found", blockHash)
+		}
+
+		block = *DeserializeBlock(blockData)
+
+		return nil
+	})
+	if err != nil {
+		return block, err
+	}
+
+	return block, nil
+}
+
+// GetBlockHashes 返回区块链中所有区块的哈希值切片
+func (bc *BlockChain) GetBlockHashes() [][]byte {
+	var blocks [][]byte
+	// 通过迭代器从尾到头遍历区块链中的所有区块
+	bci := bc.Iterator()
+	for {
+		block := bci.Next()
+		blocks = append(blocks, block.Hash)
+		if len(block.PrevHash) == 0 {
+			break
+		}
+	}
+	return blocks
+}
+
+// IsDataBaseExists 检查区块链数据库文件是否存在
+func IsDataBaseExists(dbFile string) bool {
 	if _, err := os.Stat(dbFile); os.IsNotExist(err) {
 		return false
 	}
@@ -80,13 +181,14 @@ func IsDataBaseExists() bool {
 
 // 当区块链数据库已存在（包含创世块及后续区块）时
 // 通过该函数连接到现有数据库，初始化区块链实例，获取链的最新状态（末端哈希），供后续操作（如添加区块、查询交易等）使用
-func NewBlockChain() (*BlockChain, error) {
-	if !IsDataBaseExists() {
+func NewBlockChain(nodeID string) (*BlockChain, error) {
+	currentDbFile := fmt.Sprintf(dbFile, nodeID)
+	if !IsDataBaseExists(currentDbFile) {
 		fmt.Println("No existing blockchain found. Create one first.")
 		os.Exit(1)
 	}
 	var tip []byte 
-	db, err := bolt.Open(dbFile, 0600, nil)
+	db, err := bolt.Open(currentDbFile, 0600, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open db: %w", err)
 	}
@@ -110,17 +212,18 @@ func NewBlockChain() (*BlockChain, error) {
 
 // CreateBlockchain 创建一个新的区块链数据库
 // address 用来接收挖出创世块的奖励
-func CreateBlockChain(address string) (*BlockChain, error) {
-	if IsDataBaseExists() {
+func CreateBlockChain(address string, nodeID string) (*BlockChain, error) {
+	currentDbFile := fmt.Sprintf(dbFile, nodeID)
+	if IsDataBaseExists(currentDbFile) {
 		fmt.Println("Blockchain already exists.")
 		os.Exit(1)
 	}
 	var tip []byte 
-	db, err := bolt.Open(dbFile, 0600, nil)
+	db, err := bolt.Open(currentDbFile, 0600, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open db: %w", err)
 	}
-	// bolt数据库的读写事务方法，用于执行修改数据库的操作
+	// bolt数据库的读写事务方法, 用于执行修改数据库的操作
 	err = db.Update(func (tx *bolt.Tx) error {
 		// 创建创世块
 		cbtx := NewCoinbaseTX(address, genesisCoinbaseData)
@@ -133,11 +236,11 @@ func CreateBlockChain(address string) (*BlockChain, error) {
 		if err = b.Put(genesis.Hash, genesis.Serialize()); err != nil {
 			return err
 		}
-		// 用键"l"（"last"的缩写）记录最新区块的哈希（此时为创世块哈希）
+		// 用键"l"("last"的缩写)记录最新区块的哈希(此时为创世块哈希)
 		if err = b.Put([]byte("l"), genesis.Hash); err != nil {
 			return err
 		}
-		tip = genesis.Hash // 更新tip为创世块哈希（链的末端是创世块）
+		tip = genesis.Hash // 更新tip为创世块哈希(链的末端是创世块)
 		return nil
 	})
 

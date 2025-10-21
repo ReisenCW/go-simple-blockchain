@@ -12,7 +12,6 @@ import (
 )
 
 const version = byte(0x00)
-const walletFile = "wallet.dat"
 const addressChecksumLen = 4 // 地址校验和的长度（固定4字节，用于验证地址有效性）
 
 type Wallet struct {
